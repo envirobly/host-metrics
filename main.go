@@ -16,14 +16,17 @@ import (
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
+	"github.com/shirou/gopsutil/net"
 )
 
 // Metrics structure
 type Metrics struct {
 	ramUsage prometheus.Gauge
 	cpuUsage prometheus.Gauge
-	zfsUsage *prometheus.GaugeVec    // For ZFS pool utilization
-	fsUsage  *prometheus.GaugeVec    // For filesystem utilization
+	zfsUsage *prometheus.GaugeVec
+	fsUsage  *prometheus.GaugeVec
+	netBytesSent *prometheus.GaugeVec
+	netBytesRecv *prometheus.GaugeVec
 }
 
 // NewMetrics initializes Prometheus metrics
@@ -51,6 +54,20 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"filesystem", "mountpoint"},
 		),
+		netBytesSent: prometheus.NewGaugeVec(
+	    prometheus.GaugeOpts{
+	      Name: "network_bytes_sent_total",
+	      Help: "Total bytes transmitted on network interfaces",
+	    },
+	    []string{"interface"},
+		),
+		netBytesRecv: prometheus.NewGaugeVec(
+	    prometheus.GaugeOpts{
+	      Name: "network_bytes_recv_total",
+	      Help: "Total bytes received on network interfaces",
+	    },
+	    []string{"interface"},
+		),
 	}
 }
 
@@ -60,6 +77,8 @@ func (m *Metrics) RegisterMetrics(reg *prometheus.Registry) {
 	reg.MustRegister(m.cpuUsage)
 	reg.MustRegister(m.zfsUsage)
 	reg.MustRegister(m.fsUsage)
+	reg.MustRegister(m.netBytesSent)
+	reg.MustRegister(m.netBytesRecv)
 }
 
 // roundToTwoDecimals rounds a float64 to two decimal places
@@ -162,6 +181,23 @@ func (m *Metrics) CollectMetrics() {
 			}
 		}
 
+		// Get network I/O stats
+		netIOStats, err := net.IOCounters(true)
+		if err != nil {
+			log.Printf("Error collecting network I/O stats: %v", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		// Loop through the stats and filter for interfaces that start with "ens"
+		for _, stat := range netIOStats {
+			if strings.HasPrefix(stat.Name, "ens") {
+				// Set the metrics for transmitted and received bytes
+				m.netBytesSent.WithLabelValues(stat.Name).Set(float64(stat.BytesSent))
+				m.netBytesRecv.WithLabelValues(stat.Name).Set(float64(stat.BytesRecv))
+			}
+		}
+
 		time.Sleep(5 * time.Second) // Collect every 5 seconds
 	}
 }
@@ -175,7 +211,7 @@ func main() {
 
 	// Start metric collection in separate goroutines
 	go metrics.CollectMetrics()
-	go metrics.CollectZFSMetrics() // Omitted for brevity, ZFS collection would go here
+	go metrics.CollectZFSMetrics()
 	go metrics.CollectFSMetrics()
 
 	// Expose only the custom metrics via HTTP endpoint
