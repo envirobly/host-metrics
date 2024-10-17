@@ -17,5 +17,5 @@ go run main.go
 ## Building for Linux
 
 ```sh
-GOOS=linux GOARCH=arm64 go build -o dist/$GOARCH/host-metrics .
+GOOS=linux GOARCH=arm64 go build -o dist/arm64/host-metrics .
 ```
