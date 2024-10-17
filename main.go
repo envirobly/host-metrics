@@ -67,6 +67,12 @@ func roundToTwoDecimals(value float64) float64 {
 	return math.Round(value*100) / 100
 }
 
+func isExcludedMountPoint(mountpoint string) bool {
+	return strings.HasPrefix(mountpoint, "/boot/efi") ||
+		strings.HasPrefix(mountpoint, "/var/envirobly/zpools") ||
+		strings.HasPrefix(mountpoint, "/var/lib/docker/volumes")
+}
+
 // CollectZFSMetrics collects ZFS pool utilization metrics
 func (m *Metrics) CollectZFSMetrics() {
 	for {
@@ -116,6 +122,10 @@ func (m *Metrics) CollectFSMetrics() {
 		}
 
 		for _, partition := range partitions {
+			if isExcludedMountPoint(partition.Mountpoint) {
+				continue
+			}
+
 			usageStat, err := disk.Usage(partition.Mountpoint) // Get usage for each mount point
 			if err != nil {
 				log.Printf("Error collecting filesystem usage for %s: %v", partition.Mountpoint, err)
