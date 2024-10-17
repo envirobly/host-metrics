@@ -34,41 +34,41 @@ type Metrics struct {
 func NewMetrics() *Metrics {
 	return &Metrics{
 		ramUsage: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "ram_usage_percent",
+			Name: "envirobly_ram_usage_percent",
 			Help: "Total RAM utilization in percent",
 		}),
 		cpuUsage: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "cpu_usage_percent",
+			Name: "envirobly_cpu_usage_percent",
 			Help: "Total CPU utilization in percent (across all cores)",
 		}),
 		swapUsage: prometheus.NewGauge(prometheus.GaugeOpts{
-	    Name: "swap_usage_percent",
+	    Name: "envirobly_swap_usage_percent",
 	    Help: "Total swap memory utilization in percent",
 		}),
 		zfsUsage: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "zfs_pool_usage_percent",
+				Name: "envirobly_zpool_usage_percent",
 				Help: "ZFS pool utilization in percent (capacity)",
 			},
 			[]string{"pool"},
 		),
 		fsUsage: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Name: "filesystem_usage_percent",
+				Name: "envirobly_filesystem_usage_percent",
 				Help: "Filesystem utilization in percent",
 			},
 			[]string{"filesystem", "mountpoint"},
 		),
 		netBytesSent: prometheus.NewGaugeVec(
 	    prometheus.GaugeOpts{
-	      Name: "network_bytes_sent_total",
+	      Name: "envirobly_network_bytes_sent_total",
 	      Help: "Total bytes transmitted on network interfaces",
 	    },
 	    []string{"interface"},
 		),
 		netBytesRecv: prometheus.NewGaugeVec(
 	    prometheus.GaugeOpts{
-	      Name: "network_bytes_recv_total",
+	      Name: "envirobly_network_bytes_recv_total",
 	      Help: "Total bytes received on network interfaces",
 	    },
 	    []string{"interface"},
@@ -98,74 +98,15 @@ func isExcludedMountPoint(mountpoint string) bool {
 		strings.HasPrefix(mountpoint, "/var/lib/docker/volumes")
 }
 
-// CollectZFSMetrics collects ZFS pool utilization metrics
-func (m *Metrics) CollectZFSMetrics() {
-	for {
-		// Execute 'zpool list' to get ZFS pool utilization percentages (capacity)
-		out, err := exec.Command("zpool", "list", "-H", "-o", "name,cap").Output()
-		if err != nil {
-			log.Printf("Error collecting ZFS metrics: %v", err)
-			continue
-		}
-
-		scanner := bufio.NewScanner(strings.NewReader(string(out)))
-		for scanner.Scan() {
-			fields := strings.Fields(scanner.Text())
-			if len(fields) != 2 {
-				continue // Skip invalid lines
-			}
-
-			poolName := fields[0]
-			capPercentStr := strings.TrimSuffix(fields[1], "%") // Remove '%' symbol
-
-			capPercent, err := strconv.ParseFloat(capPercentStr, 64)
-			if err != nil {
-				log.Printf("Error parsing capacity percentage for pool %s: %v", poolName, err)
-				continue
-			}
-
-			// Set the metric value for this pool
-			m.zfsUsage.WithLabelValues(poolName).Set(roundToTwoDecimals(capPercent))
-		}
-
-		if err := scanner.Err(); err != nil {
-			log.Printf("Error scanning ZFS output: %v", err)
-		}
-
-		time.Sleep(10 * time.Second) // Collect every 10 seconds
-	}
-}
-
-// CollectFSMetrics collects filesystem utilization metrics using gopsutil/disk
+// CollectFSMetrics collects using gopsutil/disk
 func (m *Metrics) CollectFSMetrics() {
 	for {
-		partitions, err := disk.Partitions(false) // Get all mounted partitions
-		if err != nil {
-			log.Printf("Error collecting filesystem partitions: %v", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
 
-		for _, partition := range partitions {
-			if isExcludedMountPoint(partition.Mountpoint) {
-				continue
-			}
-
-			usageStat, err := disk.Usage(partition.Mountpoint) // Get usage for each mount point
-			if err != nil {
-				log.Printf("Error collecting filesystem usage for %s: %v", partition.Mountpoint, err)
-				continue
-			}
-
-			// Set the metric value for this filesystem
-			m.fsUsage.WithLabelValues(partition.Device, partition.Mountpoint).Set(roundToTwoDecimals(usageStat.UsedPercent))
-		}
 
 		time.Sleep(10 * time.Second) // Collect every 10 seconds
 	}
 }
 
-// CollectMetrics collects RAM and CPU metrics
 func (m *Metrics) CollectMetrics() {
 	for {
 		// Collect RAM usage
@@ -211,7 +152,61 @@ func (m *Metrics) CollectMetrics() {
 			}
 		}
 
-		time.Sleep(5 * time.Second) // Collect every 5 seconds
+		// Get filesystem utilization metrics
+		partitions, err := disk.Partitions(false) // Get all mounted partitions
+		if err != nil {
+			log.Printf("Error collecting filesystem partitions: %v", err)
+		} else {
+			for _, partition := range partitions {
+				if isExcludedMountPoint(partition.Mountpoint) {
+					continue
+				}
+
+				usageStat, err := disk.Usage(partition.Mountpoint) // Get usage for each mount point
+				if err != nil {
+					log.Printf("Error collecting filesystem usage for %s: %v", partition.Mountpoint, err)
+					continue
+				}
+
+				// Set the metric value for this filesystem
+				m.fsUsage.
+					WithLabelValues(partition.Device, partition.Mountpoint).
+					Set(roundToTwoDecimals(usageStat.UsedPercent))
+			}
+		}
+
+		// Get ZFS pool utilization metrics
+		// Execute 'zpool list' to get ZFS pool utilization percentages (capacity)
+		out, err := exec.Command("zpool", "list", "-H", "-o", "name,cap").Output()
+		if err != nil {
+			log.Printf("Error collecting ZFS metrics: %v", err)
+		} else {
+			scanner := bufio.NewScanner(strings.NewReader(string(out)))
+			for scanner.Scan() {
+				fields := strings.Fields(scanner.Text())
+				if len(fields) != 2 {
+					continue // Skip invalid lines
+				}
+
+				poolName := fields[0]
+				capPercentStr := strings.TrimSuffix(fields[1], "%") // Remove '%' symbol
+
+				capPercent, err := strconv.ParseFloat(capPercentStr, 64)
+				if err != nil {
+					log.Printf("Error parsing capacity percentage for pool %s: %v", poolName, err)
+					continue
+				}
+
+				// Set the metric value for this pool
+				m.zfsUsage.WithLabelValues(poolName).Set(roundToTwoDecimals(capPercent))
+			}
+
+			if err := scanner.Err(); err != nil {
+				log.Printf("Error scanning ZFS output: %v", err)
+			}
+		}
+
+		time.Sleep(7 * time.Second) // Collect every 7 seconds
 	}
 }
 
@@ -224,11 +219,9 @@ func main() {
 
 	// Start metric collection in separate goroutines
 	go metrics.CollectMetrics()
-	go metrics.CollectZFSMetrics()
-	go metrics.CollectFSMetrics()
 
 	// Expose only the custom metrics via HTTP endpoint
 	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-	fmt.Println("Starting server on :2112")
-	log.Fatal(http.ListenAndServe(":2112", nil))
+	fmt.Println("Starting server on :63107")
+	log.Fatal(http.ListenAndServe(":63107", nil))
 }
