@@ -98,15 +98,6 @@ func isExcludedMountPoint(mountpoint string) bool {
 		strings.HasPrefix(mountpoint, "/var/lib/docker/volumes")
 }
 
-// CollectFSMetrics collects using gopsutil/disk
-func (m *Metrics) CollectFSMetrics() {
-	for {
-
-
-		time.Sleep(10 * time.Second) // Collect every 10 seconds
-	}
-}
-
 func (m *Metrics) CollectMetrics() {
 	for {
 		// Collect RAM usage
