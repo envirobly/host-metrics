@@ -18,4 +18,5 @@ go run main.go
 
 ```sh
 GOOS=linux GOARCH=arm64 go build -o dist/arm64/host-metrics .
+chmod +x dist/arm64/host-metrics
 ```
