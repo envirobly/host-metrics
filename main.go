@@ -208,7 +208,7 @@ func main() {
 	metrics := NewMetrics()
 	metrics.RegisterMetrics(registry)
 
-	// Start metric collection in separate goroutines
+	// Start metric collection in separate goroutine
 	go metrics.CollectMetrics()
 
 	// Expose only the custom metrics via HTTP endpoint
