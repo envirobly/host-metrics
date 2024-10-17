@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/disk"
 	"github.com/shirou/gopsutil/mem"
 )
 
@@ -21,7 +22,8 @@ import (
 type Metrics struct {
 	ramUsage prometheus.Gauge
 	cpuUsage prometheus.Gauge
-	zfsUsage *prometheus.GaugeVec // For ZFS pool utilization
+	zfsUsage *prometheus.GaugeVec    // For ZFS pool utilization
+	fsUsage  *prometheus.GaugeVec    // For filesystem utilization
 }
 
 // NewMetrics initializes Prometheus metrics
@@ -42,6 +44,13 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"pool"},
 		),
+		fsUsage: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "filesystem_usage_percent",
+				Help: "Filesystem utilization in percent",
+			},
+			[]string{"filesystem", "mountpoint"},
+		),
 	}
 }
 
@@ -50,6 +59,7 @@ func (m *Metrics) RegisterMetrics(reg *prometheus.Registry) {
 	reg.MustRegister(m.ramUsage)
 	reg.MustRegister(m.cpuUsage)
 	reg.MustRegister(m.zfsUsage)
+	reg.MustRegister(m.fsUsage)
 }
 
 // roundToTwoDecimals rounds a float64 to two decimal places
@@ -57,7 +67,7 @@ func roundToTwoDecimals(value float64) float64 {
 	return math.Round(value*100) / 100
 }
 
-// CollectZFSMetrics collects ZFS pool utilization metrics using the 'cap' percentage from 'zpool list'
+// CollectZFSMetrics collects ZFS pool utilization metrics
 func (m *Metrics) CollectZFSMetrics() {
 	for {
 		// Execute 'zpool list' to get ZFS pool utilization percentages (capacity)
@@ -89,6 +99,31 @@ func (m *Metrics) CollectZFSMetrics() {
 
 		if err := scanner.Err(); err != nil {
 			log.Printf("Error scanning ZFS output: %v", err)
+		}
+
+		time.Sleep(10 * time.Second) // Collect every 10 seconds
+	}
+}
+
+// CollectFSMetrics collects filesystem utilization metrics using gopsutil/disk
+func (m *Metrics) CollectFSMetrics() {
+	for {
+		partitions, err := disk.Partitions(false) // Get all mounted partitions
+		if err != nil {
+			log.Printf("Error collecting filesystem partitions: %v", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+
+		for _, partition := range partitions {
+			usageStat, err := disk.Usage(partition.Mountpoint) // Get usage for each mount point
+			if err != nil {
+				log.Printf("Error collecting filesystem usage for %s: %v", partition.Mountpoint, err)
+				continue
+			}
+
+			// Set the metric value for this filesystem
+			m.fsUsage.WithLabelValues(partition.Device, partition.Mountpoint).Set(roundToTwoDecimals(usageStat.UsedPercent))
 		}
 
 		time.Sleep(10 * time.Second) // Collect every 10 seconds
@@ -130,7 +165,8 @@ func main() {
 
 	// Start metric collection in separate goroutines
 	go metrics.CollectMetrics()
-	go metrics.CollectZFSMetrics()
+	go metrics.CollectZFSMetrics() // Omitted for brevity, ZFS collection would go here
+	go metrics.CollectFSMetrics()
 
 	// Expose only the custom metrics via HTTP endpoint
 	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
