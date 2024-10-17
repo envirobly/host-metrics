@@ -23,20 +23,20 @@ type Metrics struct {
 func NewMetrics() *Metrics {
 	return &Metrics{
 		ramUsage: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "ram_usage_percent",
+			Name: "envirobly:node:mem_utilization:percent",
 			Help: "Total RAM utilization in percent",
 		}),
 		cpuUsage: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "cpu_usage_percent",
+			Name: "envirobly:node:cpu_utilization:percent",
 			Help: "Total CPU utilization in percent (across all cores)",
 		}),
 	}
 }
 
-// RegisterMetrics registers metrics with Prometheus
-func (m *Metrics) RegisterMetrics() {
-	prometheus.MustRegister(m.ramUsage)
-	prometheus.MustRegister(m.cpuUsage)
+// RegisterMetrics registers metrics with Prometheus custom registry
+func (m *Metrics) RegisterMetrics(reg *prometheus.Registry) {
+	reg.MustRegister(m.ramUsage)
+	reg.MustRegister(m.cpuUsage)
 }
 
 // roundToTwoDecimals rounds a float64 to two decimal places
@@ -71,14 +71,17 @@ func (m *Metrics) CollectMetrics() {
 }
 
 func main() {
+	// Create a custom registry to avoid the default Go metrics
+	registry := prometheus.NewRegistry()
+
 	metrics := NewMetrics()
-	metrics.RegisterMetrics()
+	metrics.RegisterMetrics(registry)
 
 	// Start metric collection in a goroutine
 	go metrics.CollectMetrics()
 
-	// Expose metrics via HTTP endpoint for Prometheus to scrape
-	http.Handle("/metrics", promhttp.Handler())
+	// Expose only the custom metrics via HTTP endpoint
+	http.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 	fmt.Println("Starting server on :2112")
 	log.Fatal(http.ListenAndServe(":2112", nil))
 }
