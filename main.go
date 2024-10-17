@@ -23,6 +23,7 @@ import (
 type Metrics struct {
 	ramUsage prometheus.Gauge
 	cpuUsage prometheus.Gauge
+	swapUsage prometheus.Gauge
 	zfsUsage *prometheus.GaugeVec
 	fsUsage  *prometheus.GaugeVec
 	netBytesSent *prometheus.GaugeVec
@@ -39,6 +40,10 @@ func NewMetrics() *Metrics {
 		cpuUsage: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "cpu_usage_percent",
 			Help: "Total CPU utilization in percent (across all cores)",
+		}),
+		swapUsage: prometheus.NewGauge(prometheus.GaugeOpts{
+	    Name: "swap_usage_percent",
+	    Help: "Total swap memory utilization in percent",
 		}),
 		zfsUsage: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -75,6 +80,7 @@ func NewMetrics() *Metrics {
 func (m *Metrics) RegisterMetrics(reg *prometheus.Registry) {
 	reg.MustRegister(m.ramUsage)
 	reg.MustRegister(m.cpuUsage)
+	reg.MustRegister(m.swapUsage)
 	reg.MustRegister(m.zfsUsage)
 	reg.MustRegister(m.fsUsage)
 	reg.MustRegister(m.netBytesSent)
@@ -181,20 +187,27 @@ func (m *Metrics) CollectMetrics() {
 			}
 		}
 
+		// Get swap memory statistics
+		swapStat, err := mem.SwapMemory()
+		if err != nil {
+			log.Printf("Error collecting swap memory metrics: %v", err)
+		} else {
+			// Set the swap usage metric
+			m.swapUsage.Set(roundToTwoDecimals(swapStat.UsedPercent))
+		}
+
 		// Get network I/O stats
 		netIOStats, err := net.IOCounters(true)
 		if err != nil {
 			log.Printf("Error collecting network I/O stats: %v", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-
-		// Loop through the stats and filter for interfaces that start with "ens"
-		for _, stat := range netIOStats {
-			if strings.HasPrefix(stat.Name, "ens") {
-				// Set the metrics for transmitted and received bytes
-				m.netBytesSent.WithLabelValues(stat.Name).Set(float64(stat.BytesSent))
-				m.netBytesRecv.WithLabelValues(stat.Name).Set(float64(stat.BytesRecv))
+		} else {
+			// Loop through the stats and filter for interfaces that start with "ens"
+			for _, stat := range netIOStats {
+				if strings.HasPrefix(stat.Name, "ens") {
+					// Set the metrics for transmitted and received bytes
+					m.netBytesSent.WithLabelValues(stat.Name).Set(float64(stat.BytesSent))
+					m.netBytesRecv.WithLabelValues(stat.Name).Set(float64(stat.BytesRecv))
+				}
 			}
 		}
 
