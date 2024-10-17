@@ -13,3 +13,9 @@ go get github.com/shirou/gopsutil/mem
 # Running
 go run main.go
 ```
+
+## Building for Linux
+
+```sh
+GOOS=linux GOARCH=arm64 go build -o dist/$GOARCH/host-metrics .
+```
